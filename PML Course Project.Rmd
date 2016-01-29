@@ -1,0 +1,105 @@
+---
+title: "PML Course Project"
+author: "Erik Pfalzer"
+date: "January 18, 2016"
+output: html_document
+---
+##Backround information
+The purpose of this paper is to show how a model was created to predict the manner in which an exercise was performed given a large amount of variables. 
+
+A testing and tuning dataset were provided. Locations are:
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv
+
+The original data from this project originated from:
+http://groupware.les.inf.puc-rio.br/har
+
+The concept behind this data is that with personal activity data is often used to determine the quantity of an action preformed and not the quality of the action. 
+
+The classe data that we are trying to predict is a classification of how well a barbell curl was performed. 
+
+
+##Required packages. 
+This model was built on a windows 10 laptop.
+```{r warning=FALSE}
+library(caret)
+library(ggplot2)
+library(doParallel)
+```
+
+
+## Input Data
+This process assumes you have downloaded the csv files into you working directory. Initial cleanup involves setting NA strings.
+```{r}
+training <- read.csv("pml-training.csv", na.strings=c("NA","#DIV/0!",""))
+testing <- read.csv("pml-testing.csv", na.strings=c("NA","#DIV/0!",""))
+```
+
+## Segment Data
+Training data will be split into a testing and training dataset using a 70/30 split.
+```{r}
+inmytrain<- createDataPartition(y=training$classe,p=0.7,list=FALSE)
+mytest <- training[-inmytrain,]
+mytrain <- training[inmytrain,]
+```
+
+#Preprocessing
+We will remove any variable that does not contain data in atleast 5% of the observations
+```{r}
+nonNAlogi <- function(x) {
+    count<-as.vector(apply(x, 2, function(x) length(which(!is.na(x)))))
+    count/nrow(x) > .05
+}
+allna <- nonNAlogi(mytrain)
+mytrain.smaller <- mytrain[,allna]
+mytest <- mytest[,allna]
+testing <- testing[,allna]
+```
+
+
+The first 7 columns will not be used as predictors as they are believed extrainious without more backround documentation.
+```{r}
+mytrain.smaller <- mytrain.smaller[,8:length(colnames(mytrain.smaller))]
+mytest <- mytest[,8:length(colnames(mytest))]
+testing <- testing[,8:length(colnames(testing))]
+```
+
+```{r echo=FALSE}
+cl <- makeCluster(detectCores() - 1)
+registerDoParallel(cl)
+```
+
+The remaining variables are then checked for near zero variance. 
+
+```{r}
+nearZeroVar(mytrain.smaller,saveMetrics = TRUE)
+```
+
+As you can see all variables are valid.
+
+## Model building
+Two different models will be built on the training data and the most accurate one will be selected. This will be done using two of the more accurate methods found. Additional research was done using rpart, and glm. These models proved to be less than 50% accurate and will not be shown here. CrossValidation was handled by the train control cv method that is part of the caret package. 
+```{r warning=FALSE}
+RFmodel <- train(classe ~ ., method="rf", trControl = trainControl(method ="cv"), data =mytrain.smaller)
+gbmmodel <- train(classe ~ ., method="gbm", trControl = trainControl(method ="cv"), data =mytrain.smaller, verbose=FALSE)
+```
+```{r echo=FALSE}
+stopCluster(cl)
+```
+
+Results from the Random forest showed an accuracy of 99.3% with a 95% CI still at 99.0%. We expect that to be the out of sample error rate. 
+```{r warning=FALSE}
+predictedrf <- predict(RFmodel, newdata = mytest)
+confusionMatrix(predictedrf,mytest$classe)
+```
+
+Results from the GBM were less than that at 96% with a 95% CI at 95.5% accuracy. 
+For the purposes of this quiz we will submit the answers that the RF model predicted.
+```{r}
+predictedgbm <- predict(gbmmodel, newdata = mytest)
+confusionMatrix(predictedgbm,mytest$classe)
+predictedfinaltest <- predict(RFmodel, newdata = testing)
+```
+
+This achieved a 20/20 accuracy on the testing data. 
+
